@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: '1.96.0'
+  LIBPQ_MAJOR: '17'
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, ref: ${{ github.sha }} }
+      - run: test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+      - run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates gnupg pkg-config
+          curl --disable --proto '=https' --proto-redir '=https' --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y libpq5 libpq-dev pkg-config
+          pkg-config --atleast-version=17 libpq
+      - run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          version='1.7.12'
+          archive="actionlint_${version}_linux_amd64.tar.gz"
+          base="https://github.com/rhysd/actionlint/releases/download/v${version}"
+          curl --disable --proto '=https' --proto-redir '=https' --fail --silent --show-error --location "$base/$archive" --output "$RUNNER_TEMP/$archive"
+          curl --disable --proto '=https' --proto-redir '=https' --fail --silent --show-error --location "$base/actionlint_${version}_checksums.txt" --output "$RUNNER_TEMP/checksums.txt"
+          (cd "$RUNNER_TEMP" && grep "  $archive$" checksums.txt | sha256sum --check --status)
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: actionlint .github/workflows/release.yml
+      - run: cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- release-check "$(cargo +"$RUST_TOOLCHAIN" run --locked -q -p xtask -- expected-tag)"
+      - run: cargo +"$RUST_TOOLCHAIN" fmt --all -- --check
+      - run: cargo +"$RUST_TOOLCHAIN" clippy --workspace --all-targets -- -D warnings
+      - run: cargo +"$RUST_TOOLCHAIN" test --workspace --locked
+      - run: cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- workflow-check
+
+  native:
+    needs: validate
+    if: needs.validate.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: aarch64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, ref: ${{ github.sha }} }
+      - run: test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+      - name: Provision dynamic libpq
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            # PGDG supplies the required libpq 17 development/runtime packages;
+            # Ubuntu 24.04 stock packages are major 16 and are rejected.
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates gnupg pkg-config binutils
+            curl --disable --proto '=https' --proto-redir '=https' --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /usr/share/keyrings/pgdg.gpg
+            echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+            sudo apt-get update
+            sudo apt-get install -y libpq5 libpq-dev pkg-config binutils
+          else
+            brew install pkgconf
+            brew install libpq@17
+            brew link --force libpq@17
+          fi
+          pkg-config --atleast-version=17 libpq
+          prefix="$(pkg-config --variable=prefix libpq)"
+          test -d "$prefix/include" -a -d "$prefix/lib"
+          echo "PKG_CONFIG_PATH=$(pkg-config --variable=pcfiledir libpq)" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == Linux ]]; then echo "LD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV"; else echo "DYLD_LIBRARY_PATH=$prefix/lib" >> "$GITHUB_ENV"; fi
+          for name in PG_CONFIG PQ_LIB_DIR PQ_LIB_STATIC LIBPQ_STATIC PKG_CONFIG_ALL_STATIC; do unset "$name" || true; done
+      - run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy --target "${{ matrix.target }}"
+      - run: test "$(uname -m)" = "${{ matrix.arch }}" && test "$(rustc +"$RUST_TOOLCHAIN" -vV | awk '/^host:/ {print $2}')" = "${{ matrix.target }}"
+      - run: cargo +"$RUST_TOOLCHAIN" fmt --all -- --check
+      - run: cargo +"$RUST_TOOLCHAIN" clippy --workspace --all-targets -- -D warnings
+      - run: cargo +"$RUST_TOOLCHAIN" test --workspace --locked
+      - run: cargo +"$RUST_TOOLCHAIN" build --locked --release -p postgres-mcp --bin postgres-mcp --target "${{ matrix.target }}"
+      - name: Inspect dynamic linkage
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/postgres-mcp"
+          if [[ "$RUNNER_OS" == Linux ]]; then readelf -h "$binary"; readelf -l "$binary"; readelf -d "$binary" | tee "$RUNNER_TEMP/readelf.txt"; grep -E 'libpq|NEEDED' "$RUNNER_TEMP/readelf.txt"; else otool -l "$binary"; otool -L "$binary" | tee "$RUNNER_TEMP/otool.txt"; grep libpq "$RUNNER_TEMP/otool.txt"; fi
+      - run: cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- native-smoke "$(cargo +"$RUST_TOOLCHAIN" run --locked -q -p xtask -- expected-tag)" "target/${{ matrix.target }}/release/postgres-mcp"
+      - run: mkdir -p release-assets && cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- package "$(cargo +"$RUST_TOOLCHAIN" run --locked -q -p xtask -- expected-tag)" "${{ matrix.target }}" "target/${{ matrix.target }}/release/postgres-mcp" release-assets
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: { name: release-${{ matrix.target }}, path: release-assets/postgres-mcp-${{ matrix.target }}.tar.gz, if-no-files-found: error, retention-days: 7 }
+
+  publish:
+    needs: native
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, fetch-depth: 0, ref: ${{ github.sha }} }
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: { pattern: release-*, merge-multiple: true, path: release-assets }
+      - run: test -f release-assets/SHA256SUMS || sha256sum release-assets/postgres-mcp-*.tar.gz > release-assets/SHA256SUMS
+      # xtask performs draft-first publication with --draft, validates git cat-file
+      # tag provenance, and confirms the release transition with --draft=false.
+      # The gh invocation uses --verify-tag for an additional server-side check.
+      - run: cargo run --locked -p xtask -- publish "${{ github.ref_name }}" "${{ github.sha }}" release-assets
+        env: { GH_TOKEN: ${{ github.token }} }
+
+  verify-published:
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, ref: ${{ github.sha }} }
+      - name: Provision runtime libpq before download execution
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update && sudo apt-get install -y curl ca-certificates gnupg pkg-config
+            curl --disable --proto '=https' --proto-redir '=https' --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /usr/share/keyrings/pgdg.gpg
+            echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+            sudo apt-get update && sudo apt-get install -y libpq5 libpq-dev pkg-config
+          else brew install pkgconf libpq@17 && brew link --force libpq@17; fi
+          pkg-config --atleast-version=17 libpq
+      - run: cargo run --locked -p xtask -- fetch-public-assets "${{ github.ref_name }}" "$RUNNER_TEMP/assets"
+      - run: cargo run --locked -p xtask -- verify-archive "$RUNNER_TEMP/assets"
+      - run: mkdir -p "$RUNNER_TEMP/extracted" && tar -xzf "$RUNNER_TEMP/assets/postgres-mcp-${{ matrix.target }}.tar.gz" -C "$RUNNER_TEMP/extracted" --no-same-owner && test -x "$RUNNER_TEMP/extracted/postgres-mcp"
+      - run: cargo run --locked -p xtask -- native-smoke "${{ github.ref_name }}" "$RUNNER_TEMP/extracted/postgres-mcp"
+
+  verify-release-metadata:
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, ref: ${{ github.sha }} }
+      - run: cargo run --locked -p xtask -- verify-public-release "${{ github.ref_name }}" "${{ github.sha }}" "$RUNNER_TEMP/public-release-metadata.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: { name: release-public-metadata, path: ${{ runner.temp }}/public-release-metadata.json, if-no-files-found: error, retention-days: 7 }

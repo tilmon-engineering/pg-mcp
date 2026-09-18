@@ -1,0 +1,13 @@
+# Repo-local Polytoken configuration. Use with:
+#   polytoken --config-dir "$PWD" ...
+# The child receives PG_MCP_DSN from the repo's mise-loaded environment.
+
+[mcp_servers.postgres]
+transport = "stdio"
+command = "./run-local-mcp.sh"
+args = []
+pass_env = ["PG_MCP_DSN", "PKG_CONFIG_PATH", "LD_LIBRARY_PATH"]
+log_stderr = true
+log_stdout = false
+default_enabled = true
+default_timeout_seconds = 120

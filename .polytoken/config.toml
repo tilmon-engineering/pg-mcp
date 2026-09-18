@@ -1,0 +1,12 @@
+# Repo-local Polytoken MCP configuration.
+# The launcher loads PG_MCP_DSN from the repo's mise-managed .env.
+
+[mcp_servers.postgres]
+transport = "stdio"
+command = "./run-local-mcp.sh"
+args = []
+pass_env = ["HOME", "PATH", "LANG", "TMPDIR", "PG_MCP_DSN", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR", "LD_LIBRARY_PATH"]
+log_stderr = true
+log_stdout = false
+default_enabled = true
+default_timeout_seconds = 120

@@ -1,0 +1,6 @@
+/target/
+.env
+.env.*
+!.env.example
+/0b86n2-smell/
+/config.local.toml

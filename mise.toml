@@ -1,0 +1,52 @@
+[tools]
+rust = "1.96.0"
+
+[env]
+_.file = { path = ".env", optional = true }
+
+[tasks.fmt]
+run = "cargo fmt --all -- --check"
+[tasks.lint]
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+[tasks.test]
+run = "cargo test --workspace --locked"
+[tasks.build]
+run = "cargo build --workspace --locked"
+[tasks.live]
+run = "PG_MCP_LIVE=1 cargo test --workspace --locked -- --ignored"
+
+[tasks.workflow-check]
+run = "cargo run --locked -p xtask -- workflow-check"
+[tasks.release-check]
+run = "cargo run --locked -p xtask -- release-check ${1}"
+[tasks.release-build]
+run = "cargo run --locked -p xtask -- release-build ${1:-v0.1.0} ${2:-$(rustc -vV | awk '/^host:/ {print $2}')} ${3:-target/${2:-$(rustc -vV | awk '/^host:/ {print $2}')}/release/postgres-mcp}"
+[tasks.native-smoke]
+run = "cargo run --locked -p xtask -- native-smoke ${1:-v0.1.0} ${2:-target/release/postgres-mcp}"
+[tasks.ci]
+depends = ["fmt", "lint", "test", "build", "workflow-check"]
+
+[tasks.local-up]
+description = "Start the disposable local PostgreSQL 17 fixture"
+run = "bash -c 'if command -v podman-compose >/dev/null 2>&1; then podman-compose up -d; elif command -v docker >/dev/null 2>&1; then docker compose up -d; else echo \"podman-compose or docker compose is required\" >&2; exit 1; fi'"
+
+[tasks.local-down]
+description = "Stop the local PostgreSQL fixture and keep its volume"
+run = "bash -c 'if command -v podman-compose >/dev/null 2>&1; then podman-compose down; elif command -v docker >/dev/null 2>&1; then docker compose down; else echo \"podman-compose or docker compose is required\" >&2; exit 1; fi'"
+
+[tasks.local-status]
+description = "Show local PostgreSQL fixture status"
+run = "bash -c 'if command -v podman-compose >/dev/null 2>&1; then podman-compose ps; elif command -v docker >/dev/null 2>&1; then docker compose ps; else echo \"podman-compose or docker compose is required\" >&2; exit 1; fi'"
+
+[tasks.local-logs]
+description = "Follow local PostgreSQL fixture logs"
+run = "bash -c 'if command -v podman-compose >/dev/null 2>&1; then podman-compose logs -f postgres; elif command -v docker >/dev/null 2>&1; then docker compose logs -f postgres; else echo \"podman-compose or docker compose is required\" >&2; exit 1; fi'"
+
+[tasks.local-mcp]
+description = "Run the MCP server against the local PostgreSQL fixture"
+run = "cargo run --locked --bin postgres-mcp -- --config \"$PWD/config.local.toml\""
+
+[tasks.local-test]
+description = "Start PostgreSQL and run the opt-in live test suite"
+depends = ["local-up"]
+run = "PG_MCP_LIVE=1 RUST_TEST_THREADS=1 cargo test --workspace --locked -- --ignored --test-threads=1"
