@@ -140,13 +140,23 @@ fn echo_peer_loop(
     };
     stream.set_read_timeout(Some(WATCHDOG))?;
     stream.set_write_timeout(Some(WATCHDOG))?;
-    echo_connection(stream, received_tx)
+    echo_connection(stream, stop_rx, received_tx)
 }
 
-fn echo_connection(mut stream: TcpStream, received_tx: Sender<Vec<u8>>) -> io::Result<Vec<u8>> {
+fn echo_connection(
+    mut stream: TcpStream,
+    stop_rx: Receiver<()>,
+    received_tx: Sender<Vec<u8>>,
+) -> io::Result<Vec<u8>> {
     let mut received = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {
+        if matches!(
+            stop_rx.try_recv(),
+            Ok(()) | Err(mpsc::TryRecvError::Disconnected)
+        ) {
+            return Ok(received);
+        }
         match stream.read(&mut buffer) {
             Ok(0) => return Ok(received),
             Ok(length) => {
@@ -162,7 +172,7 @@ fn echo_connection(mut stream: TcpStream, received_tx: Sender<Vec<u8>>) -> io::R
                         | io::ErrorKind::WouldBlock
                 ) =>
             {
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "echo peer stalled"));
+                continue;
             }
             Err(error) => return Err(error),
         }
