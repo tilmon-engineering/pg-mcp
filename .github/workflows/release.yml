@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false, ref: ${{ github.sha }} }
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
       - run: test "$(git rev-parse HEAD)" = "${{ github.sha }}"
       - run: |
           set -euo pipefail
@@ -76,7 +78,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false, ref: ${{ github.sha }} }
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
       - run: test "$(git rev-parse HEAD)" = "${{ github.sha }}"
       - name: Provision dynamic libpq
         run: |
@@ -115,24 +119,36 @@ jobs:
       - run: cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- native-smoke "$(cargo +"$RUST_TOOLCHAIN" run --locked -q -p xtask -- expected-tag)" "target/${{ matrix.target }}/release/postgres-mcp"
       - run: mkdir -p release-assets && cargo +"$RUST_TOOLCHAIN" run --locked -p xtask -- package "$(cargo +"$RUST_TOOLCHAIN" run --locked -q -p xtask -- expected-tag)" "${{ matrix.target }}" "target/${{ matrix.target }}/release/postgres-mcp" release-assets
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: { name: release-${{ matrix.target }}, path: release-assets/postgres-mcp-${{ matrix.target }}.tar.gz, if-no-files-found: error, retention-days: 7 }
+        with:
+          name: release-${{ matrix.target }}
+          path: release-assets/postgres-mcp-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: native
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
-    permissions: { contents: write }
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false, fetch-depth: 0, ref: ${{ github.sha }} }
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with: { pattern: release-*, merge-multiple: true, path: release-assets }
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
       - run: test -f release-assets/SHA256SUMS || sha256sum release-assets/postgres-mcp-*.tar.gz > release-assets/SHA256SUMS
       # xtask performs draft-first publication with --draft, validates git cat-file
       # tag provenance, and confirms the release transition with --draft=false.
       # The gh invocation uses --verify-tag for an additional server-side check.
       - run: cargo run --locked -p xtask -- publish "${{ github.ref_name }}" "${{ github.sha }}" release-assets
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   verify-published:
     needs: publish
@@ -152,7 +168,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false, ref: ${{ github.sha }} }
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
       - name: Provision runtime libpq before download execution
         run: |
           set -euo pipefail
@@ -174,7 +192,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false, ref: ${{ github.sha }} }
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
       - run: cargo run --locked -p xtask -- verify-public-release "${{ github.ref_name }}" "${{ github.sha }}" "$RUNNER_TEMP/public-release-metadata.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with: { name: release-public-metadata, path: ${{ runner.temp }}/public-release-metadata.json, if-no-files-found: error, retention-days: 7 }
+        with:
+          name: release-public-metadata
+          path: ${{ runner.temp }}/public-release-metadata.json
+          if-no-files-found: error
+          retention-days: 7
