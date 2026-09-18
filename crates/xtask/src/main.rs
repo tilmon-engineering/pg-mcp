@@ -257,7 +257,7 @@ fn verify_binary(binary: &Path, version: &str) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
     if !o.status.success()
-        || o.stderr.len() != 0
+        || !o.stderr.is_empty()
         || o.stdout != format!("{PRODUCT} {version}\n").as_bytes()
     {
         return Err("--version contract failed".into());
