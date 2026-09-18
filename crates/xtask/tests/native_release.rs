@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -22,7 +22,7 @@ fn archive_names() -> [&'static str; 4] {
         "postgres-mcp-x86_64-apple-darwin.tar.gz",
     ]
 }
-fn sums(p: &PathBuf) {
+fn sums(p: &Path) {
     let mut s = String::new();
     for n in archive_names() {
         fs::write(p.join(n), n).unwrap();
@@ -37,7 +37,7 @@ fn sums(p: &PathBuf) {
     }
     fs::write(p.join("SHA256SUMS"), s).unwrap();
 }
-fn run(p: &PathBuf) -> std::process::Output {
+fn run(p: &Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_xtask"))
         .args([
             "verify-downloads",
