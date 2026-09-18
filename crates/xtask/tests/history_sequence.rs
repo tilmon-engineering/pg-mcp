@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -28,7 +28,7 @@ fn git(root: &PathBuf, args: &[&str]) -> std::process::Output {
     );
     o
 }
-fn write(root: &PathBuf, rel: &str, body: &str) {
+fn write(root: &Path, rel: &str, body: &str) {
     let p = root.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(p, body).unwrap();
