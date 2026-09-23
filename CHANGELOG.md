@@ -10,7 +10,11 @@ All notable changes to `postgres-mcp` are documented here.
 
 ### Changed
 
-- Provisional: release publisher now uses the canonical HTTPS repository origin; finalize from inspected implementation history.
+Notes were finalized from inspected history spanning published `v0.1.0` through implementation commit `9aa0550` (2 commits); this subsequent notes-only commit is not part of that inspected history.
+
+### Changed
+
+- The release publisher now uses the canonical HTTPS repository origin when publishing GitHub releases, avoiding dependence on the checkout's configured remote URL.
 
 ### Platform notes
 
