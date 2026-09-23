@@ -6,6 +6,16 @@ All notable changes to `postgres-mcp` are documented here.
 
 - Further improvements are planned.
 
+## [0.1.1] - 2026-09-23
+
+### Changed
+
+- Provisional: release publisher now uses the canonical HTTPS repository origin; finalize from inspected implementation history.
+
+### Platform notes
+
+Release targets and runtime requirements are unchanged from 0.1.0: Linux GNU/glibc on Ubuntu 24.04 and macOS with compatible Homebrew `libpq@17`; macOS artifacts remain unsigned and unnotarized.
+
 ## [0.1.0] - 2026-09-17
 
 ### Added
